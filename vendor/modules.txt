@@ -1,0 +1,67 @@
+# codeberg.org/readeck/go-readability/v2 v2.1.1
+## explicit; go 1.23.0
+codeberg.org/readeck/go-readability/v2
+codeberg.org/readeck/go-readability/v2/internal/re2go
+codeberg.org/readeck/go-readability/v2/render
+# github.com/JohannesKaufmann/dom v0.3.1
+## explicit; go 1.25.0
+github.com/JohannesKaufmann/dom
+# github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
+## explicit; go 1.25.0
+github.com/JohannesKaufmann/html-to-markdown/v2/collapse
+github.com/JohannesKaufmann/html-to-markdown/v2/converter
+github.com/JohannesKaufmann/html-to-markdown/v2/internal/domutils
+github.com/JohannesKaufmann/html-to-markdown/v2/internal/escape
+github.com/JohannesKaufmann/html-to-markdown/v2/internal/textutils
+github.com/JohannesKaufmann/html-to-markdown/v2/marker
+github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base
+github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark
+github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table
+# github.com/andybalholm/cascadia v1.3.4
+## explicit; go 1.25.0
+github.com/andybalholm/cascadia
+# github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
+## explicit; go 1.12
+github.com/araddon/dateparse
+# github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c
+## explicit; go 1.20
+github.com/go-shiori/dom
+# github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f
+## explicit
+github.com/gogs/chardet
+# github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+## explicit; go 1.24.1
+github.com/ledongthuc/pdf
+# golang.org/x/image v0.42.0
+## explicit; go 1.25.0
+golang.org/x/image/draw
+golang.org/x/image/math/f64
+golang.org/x/image/riff
+golang.org/x/image/vp8
+golang.org/x/image/vp8l
+golang.org/x/image/webp
+# golang.org/x/net v0.55.0
+## explicit; go 1.25.0
+golang.org/x/net/html
+golang.org/x/net/html/atom
+golang.org/x/net/html/charset
+# golang.org/x/text v0.38.0
+## explicit; go 1.25.0
+golang.org/x/text/encoding
+golang.org/x/text/encoding/charmap
+golang.org/x/text/encoding/htmlindex
+golang.org/x/text/encoding/internal
+golang.org/x/text/encoding/internal/identifier
+golang.org/x/text/encoding/japanese
+golang.org/x/text/encoding/korean
+golang.org/x/text/encoding/simplifiedchinese
+golang.org/x/text/encoding/traditionalchinese
+golang.org/x/text/encoding/unicode
+golang.org/x/text/internal/language
+golang.org/x/text/internal/language/compact
+golang.org/x/text/internal/tag
+golang.org/x/text/internal/utf8internal
+golang.org/x/text/language
+golang.org/x/text/runes
+golang.org/x/text/transform
+golang.org/x/text/unicode/norm
