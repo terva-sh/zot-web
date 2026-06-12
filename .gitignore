@@ -1,0 +1,11 @@
+# build output (binary name matches extension.json "exec")
+/zot-web
+/bin/
+
+# local config / secrets that may sit next to the binary during dev
+config.json
+
+# editor / OS noise
+*.swp
+.DS_Store
+dist/
