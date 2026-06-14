@@ -54,12 +54,15 @@ just configure-searxng https://searx.example/
 ```
 
 `just configure-searxng` writes `config.json` into the installed extension's
-data dir, resolving that dir from `zot ext list` so it works regardless of OS
-(macOS, Linux) or a custom `$ZOT_HOME`. A bare `host:port` is accepted and gets
-an `http://` prefix. When the target is loopback (`localhost`, `127.*`, or
-`[::1]`), the command also writes the matching `allow_local_hosts` entries so
-the SSRF guard permits that deliberate local SearXNG backend. The default
-instance is the `SEARXNG_URL` variable at the top of the `justfile`.
+data dir, resolving that dir from `ext list` so it works regardless of OS
+(macOS, Linux) or a custom home. A bare `host:port` is accepted and gets
+an `http://` prefix. The written config allowlists the SearXNG host alongside
+the loopback defaults, so the SSRF guard permits that deliberate backend even
+when it lives on a LAN or VPN address. The default instance is the
+`SEARXNG_URL` variable at the top of the `justfile`.
+
+Both recipes target [terva](#host-integration-zot-and-terva) by default; pass
+`zot` (`just install zot`) or override `HOST` to target stock zot.
 
 `just install` removes and recopies the install dir, but **preserves an
 existing `config.json`** across the reinstall — so you only need
@@ -121,18 +124,18 @@ Or switch to a self-hosted SearXNG instance (no key, private):
 // $ZOT_HOME/extensions/zot-web/config.json
 {
   "search_backend": "searxng",
-  "searxng_url": "http://127.0.0.1:11984",
-  "allow_local_hosts": ["localhost", "intranet.example", "10.0.0.0/24"]
+  "searxng_url": "http://127.0.0.1:11984"
 }
 ```
 
 > SearXNG must have `json` listed under `search.formats` in its `settings.yml`,
 > otherwise its API returns `403`.
 >
-> SearXNG queries run through the **same SSRF guard** as `web_fetch`, so a
-> self-hosted instance on a private/loopback address (the common case) must have
-> its host or IP in `allow_local_hosts` — as in the example above — or every
-> search is blocked. `just configure-searxng` writes that entry for you.
+> SearXNG queries run through the **same SSRF guard** as `web_fetch`. Loopback
+> is allowed out of the box, so the example above just works — but an instance
+> on a LAN/VPN address must be in `allow_local_hosts` or every search is
+> blocked (see [the allowlist](#security-ssrf-protection--the-local-allowlist)).
+> `just configure-searxng` writes that entry for you.
 
 ### All settings
 
@@ -149,7 +152,7 @@ Or switch to a self-hosted SearXNG instance (no key, private):
 | `fetch_cache_max_entries` | `ZOT_WEB_FETCH_CACHE_MAX_ENTRIES` | `32` | max cached pages, LRU-evicted (`0` = caching off; clamped to max `128`) |
 | `fetch_cache_max_bytes` | `ZOT_WEB_FETCH_CACHE_MAX_BYTES` | `67108864` | total bytes the page cache may retain, LRU-evicted (`0` = no byte bound; clamped to max `268435456`) |
 | `user_agent` | `ZOT_WEB_USER_AGENT` | `zot-web/<version>` | User-Agent for every fetch; `browser` expands to a common desktop-browser UA |
-| `allow_local_hosts` | `ZOT_WEB_ALLOW_LOCAL_HOSTS` (comma-sep) | — | SSRF escape hatch (see below) |
+| `allow_local_hosts` | `ZOT_WEB_ALLOW_LOCAL_HOSTS` (comma-sep) | `localhost, 127.0.0.1, ::1` | SSRF escape hatch (see below); the config key replaces the default, the env var appends |
 
 ### User-Agent
 
@@ -313,21 +316,40 @@ Because the model chooses the URL, `web_fetch` is the main attack surface
 - allows `http`/`https` only;
 - resolves the host and **refuses private/reserved/loopback/link-local,
   documentation, benchmarking, CGNAT, multicast, and other special-use
-  addresses** — including the cloud metadata address `169.254.169.254`;
+  addresses** — including the cloud metadata address `169.254.169.254`
+  (loopback is exempted by the default allowlist below);
 - dials the validated IP directly (closing the DNS-rebinding gap) and re-checks
   on every redirect; caps redirects, time, and response size;
 - refuses a short list of well-known non-web service ports (SSH, SMTP, MySQL,
   Redis, RDP, …) outright, so the fetcher can't be steered into poking those
   services even on a public host.
 
-To deliberately reach local services, add them to **`allow_local_hosts`**. Each
-entry is one of:
+The escape hatch is **`allow_local_hosts`**. It ships with loopback already
+allowed — `["localhost", "127.0.0.1", "::1"]` — so locally hosted services (a
+dev server, a local SearXNG) work without ceremony. To reach anything beyond
+loopback, set the key in `config.json`; it **replaces** the default, so restate
+the loopback entries alongside your additions:
+
+```jsonc
+"allow_local_hosts": [
+  "localhost", "127.0.0.1", "::1",   // the shipped default
+  "grafana.internal",                // a hostname on your LAN
+  "192.168.1.0/24",                  // a home subnet
+  "100.64.0.0/10"                    // e.g. a tailnet (CGNAT range)
+]
+```
+
+Each entry is one of:
 
 - a **hostname** — matched against the request host (e.g. `localhost`,
   `grafana.internal`). Hostname entries trust that name's DNS: any blocked-range
   IP the name resolves to is permitted;
 - an **IP** — matched against the resolved address (e.g. `127.0.0.1`);
 - a **CIDR** — matched against the resolved address (e.g. `192.168.1.0/24`).
+
+An explicit `"allow_local_hosts": []` locks loopback back down for hardened
+setups. The `ZOT_WEB_ALLOW_LOCAL_HOSTS` env var (comma-separated) *appends* to
+whatever the file produced rather than replacing it.
 
 This is a precise escape hatch, not an "allow all local" switch: only the
 targets you list are exempted.

@@ -33,8 +33,9 @@ func TestLoadDefaults(t *testing.T) {
 	if c.FetchInlineImages != false {
 		t.Errorf("FetchInlineImages = %v, want false", c.FetchInlineImages)
 	}
-	if len(c.AllowLocalHosts) != 0 {
-		t.Errorf("AllowLocalHosts = %v, want empty", c.AllowLocalHosts)
+	if len(c.AllowLocalHosts) != 3 || c.AllowLocalHosts[0] != "localhost" ||
+		c.AllowLocalHosts[1] != "127.0.0.1" || c.AllowLocalHosts[2] != "::1" {
+		t.Errorf("AllowLocalHosts = %v, want loopback defaults [localhost 127.0.0.1 ::1]", c.AllowLocalHosts)
 	}
 }
 
@@ -134,8 +135,8 @@ func TestEnvOverrides(t *testing.T) {
 	if c.FetchCacheMaxEntries != 64 {
 		t.Errorf("FetchCacheMaxEntries = %d, want 64", c.FetchCacheMaxEntries)
 	}
-	if len(c.AllowLocalHosts) != 3 {
-		t.Errorf("AllowLocalHosts len = %d, want 3 (empty trimmed)", len(c.AllowLocalHosts))
+	if len(c.AllowLocalHosts) != 6 {
+		t.Errorf("AllowLocalHosts len = %d, want 6 (3 defaults + 3 from env, empty trimmed)", len(c.AllowLocalHosts))
 	}
 }
 
@@ -277,10 +278,11 @@ func TestEmptySearchBackendDefaultsToTavily(t *testing.T) {
 
 func TestAllowLocalHostsCommaSeparated(t *testing.T) {
 	dir := t.TempDir()
+	// A config.json key replaces the loopback defaults wholesale.
 	writeJSON(t, dir, `{"allow_local_hosts": ["one", "two"]}`)
 	c := Load(dir)
 	if len(c.AllowLocalHosts) != 2 {
-		t.Fatalf("len = %d, want 2", len(c.AllowLocalHosts))
+		t.Fatalf("len = %d, want 2 (file replaces defaults)", len(c.AllowLocalHosts))
 	}
 	if c.AllowLocalHosts[0] != "one" || c.AllowLocalHosts[1] != "two" {
 		t.Errorf("AllowLocalHosts = %v", c.AllowLocalHosts)
@@ -297,6 +299,17 @@ func TestAllowLocalHostsCommaSeparated(t *testing.T) {
 		if c.AllowLocalHosts[i] != w {
 			t.Errorf("AllowLocalHosts[%d] = %q, want %q", i, c.AllowLocalHosts[i], w)
 		}
+	}
+}
+
+func TestAllowLocalHostsEmptyArrayOptsOut(t *testing.T) {
+	// An explicit [] is the lockdown switch: it replaces the loopback
+	// defaults with nothing, restoring block-everything-private behavior.
+	dir := t.TempDir()
+	writeJSON(t, dir, `{"allow_local_hosts": []}`)
+	c := Load(dir)
+	if len(c.AllowLocalHosts) != 0 {
+		t.Errorf("AllowLocalHosts = %v, want empty (explicit [] opts out of defaults)", c.AllowLocalHosts)
 	}
 }
 

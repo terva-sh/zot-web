@@ -89,24 +89,22 @@ configure-searxng url=SEARXNG_URL host=HOST:
     [[ -n "$line" ]] || { echo "extension not installed in $host; run \`just install\` first" >&2; exit 1; }
     dir="/${line#*/}"
 
-    host="${url#*://}"; host="${host%%/*}"; host="${host%@*}"
-    if [[ "$host" == \[*\] ]]; then host="${host#[}"; host="${host%]}"; else host="${host%%:*}"; fi
-    if [[ "$host" == "localhost" || "$host" == "127."* || "$host" == "::1" ]]; then
-      cat > "$dir/config.json" <<JSON
+    # Searches share web_fetch's SSRF guard, and an allow_local_hosts key in
+    # config.json REPLACES the built-in loopback default — so restate that
+    # default and add the SearXNG host itself, which covers instances on
+    # LAN/VPN addresses. A public host in the list is harmless (the allowlist
+    # is only consulted for private/reserved addresses).
+    shost="${url#*://}"; shost="${shost%%/*}"; shost="${shost##*@}"
+    if [[ "$shost" == \[* ]]; then shost="${shost#[}"; shost="${shost%%]*}"; else shost="${shost%%:*}"; fi
+    allow='"localhost", "127.0.0.1", "::1"'
+    case "$shost" in localhost|127.0.0.1|::1) ;; *) allow="$allow, \"$shost\"" ;; esac
+    cat > "$dir/config.json" <<JSON
     {
       "search_backend": "searxng",
       "searxng_url": "$url",
-      "allow_local_hosts": ["localhost", "127.0.0.1", "::1"]
+      "allow_local_hosts": [$allow]
     }
     JSON
-    else
-      cat > "$dir/config.json" <<JSON
-    {
-      "search_backend": "searxng",
-      "searxng_url": "$url"
-    }
-    JSON
-    fi
     echo "configured searxng -> $url"
     echo "wrote $dir/config.json"
 

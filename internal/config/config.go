@@ -27,6 +27,13 @@ const (
 	MaxFetchCacheMaxBytes   int64 = 256 << 20 // 256 MiB
 )
 
+// DefaultAllowLocalHosts is the out-of-the-box SSRF allowlist: loopback only,
+// by name and by literal address (the hostname entry already covers whatever
+// "localhost" resolves to; the IPs cover URLs that dial 127.0.0.1/[::1]
+// directly). Everything else private/reserved stays blocked until the user
+// opts in.
+var DefaultAllowLocalHosts = []string{"localhost", "127.0.0.1", "::1"}
+
 // Config is the effective settings for the web extension.
 type Config struct {
 	// SearchBackend selects the web_search provider: "tavily" (default) or
@@ -74,7 +81,10 @@ type Config struct {
 	// AllowLocalHosts is the SSRF escape hatch: targets that resolve to
 	// private/reserved addresses are refused UNLESS they match an entry here.
 	// Each entry is a hostname (matched against the request host), an IP, or
-	// a CIDR (matched against the resolved IP).
+	// a CIDR (matched against the resolved IP). Defaults to loopback
+	// (DefaultAllowLocalHosts); a config.json key REPLACES the default — write
+	// the full list to extend it, or [] to lock loopback back down. The env
+	// override appends instead.
 	AllowLocalHosts []string `json:"allow_local_hosts"`
 }
 
@@ -88,6 +98,9 @@ func Load(dataDir string) Config {
 		FetchCacheTTLSec:     DefaultFetchCacheTTLSec,
 		FetchCacheMaxEntries: DefaultFetchCacheMaxEntries,
 		FetchCacheMaxBytes:   DefaultFetchCacheMaxBytes,
+		// Copy: Unmarshal overwrites the slice in place when the key is
+		// present, and the package-level default must not be clobbered.
+		AllowLocalHosts: append([]string(nil), DefaultAllowLocalHosts...),
 	}
 	if dataDir != "" {
 		if b, err := os.ReadFile(filepath.Join(dataDir, "config.json")); err == nil {
