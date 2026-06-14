@@ -121,7 +121,7 @@ func main() {
 	)
 	ensure := func() {
 		once.Do(func() {
-			cfg := config.Load(e.Host().DataDir)
+			cfg := config.Load(e.Host().DataDir, e.Host().ExtensionDir)
 			fetcher = fetch.New(cfg, fetch.ParseAllowList(cfg.AllowLocalHosts))
 			provider, provErr = search.New(cfg, fetcher.HTTPClient())
 		})

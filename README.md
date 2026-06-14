@@ -109,10 +109,19 @@ prebuilt per-platform binaries (goreleaser) beats carrying a big vendor tree.
 
 ## Configure
 
-Settings come from `config.json` in the extension's data dir
-(`$ZOT_HOME/extensions/zot-web/config.json`), with environment variables taking
-precedence. `just configure-searxng` (above) writes this file for you; to do it
-by hand, start from the default Tavily backend:
+Settings come from `config.json` in the extension's data dir, with environment
+variables taking precedence. The data dir depends on the host:
+
+- **zot (and older terva) hosts:** the install dir,
+  `$ZOT_HOME/extensions/zot-web/config.json`.
+- **terva hosts that split data from install:** the writable data dir,
+  `$TERVA_HOME/ext-data/zot-web/config.json`. An existing config still in the
+  install dir is read as a fallback, so upgrading doesn't lose your settings —
+  and a config under the data dir now survives a reinstall, since it lives
+  outside the install tree.
+
+`just configure-searxng` (above) writes this file for you; to do it by hand,
+start from the default Tavily backend:
 
 ```bash
 export TAVILY_API_KEY=tvly-...

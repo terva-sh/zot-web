@@ -88,8 +88,17 @@ type Config struct {
 	AllowLocalHosts []string `json:"allow_local_hosts"`
 }
 
-// Load reads dataDir/config.json (if present), then applies env overrides.
-func Load(dataDir string) Config {
+// Load reads config.json (if present), then applies env overrides. It
+// looks in dataDir first and falls back to extensionDir.
+//
+// On a terva host that split the dirs, dataDir is the writable
+// $TERVA_HOME/ext-data/web and extensionDir is the read-only install
+// dir. Older hosts (and the zot protocol) report both as the same install
+// dir, where config.json historically lived — so the fallback keeps an
+// existing config.json readable across that host change, and the lookup
+// is identical (a harmless double-read) on an old host. Pass "" for
+// extensionDir if the host didn't provide one.
+func Load(dataDir, extensionDir string) Config {
 	c := Config{
 		SearchBackend:        "tavily",
 		FetchMaxBytes:        DefaultFetchMaxBytes,
@@ -102,9 +111,13 @@ func Load(dataDir string) Config {
 		// present, and the package-level default must not be clobbered.
 		AllowLocalHosts: append([]string(nil), DefaultAllowLocalHosts...),
 	}
-	if dataDir != "" {
-		if b, err := os.ReadFile(filepath.Join(dataDir, "config.json")); err == nil {
+	for _, dir := range []string{dataDir, extensionDir} {
+		if dir == "" {
+			continue
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
 			_ = json.Unmarshal(b, &c)
+			break
 		}
 	}
 

@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	c := Load("")
+	c := Load("", "")
 
 	if c.SearchBackend != "tavily" {
 		t.Errorf("SearchBackend = %q, want \"tavily\"", c.SearchBackend)
@@ -54,7 +54,7 @@ func TestLoadFromConfigJSON(t *testing.T) {
 		"allow_local_hosts": ["host1", "10.0.0.1"]
 	}`)
 
-	c := Load(dir)
+	c := Load(dir, "")
 
 	if c.SearchBackend != "searxng" {
 		t.Errorf("SearchBackend = %q, want \"searxng\"", c.SearchBackend)
@@ -106,7 +106,7 @@ func TestEnvOverrides(t *testing.T) {
 		defer os.Unsetenv(k)
 	}
 
-	c := Load("")
+	c := Load("", "")
 
 	if c.SearchBackend != "searxng" {
 		t.Errorf("SearchBackend = %q, want \"searxng\" (lowercased env)", c.SearchBackend)
@@ -144,7 +144,7 @@ func TestFetchCacheMaxEntriesNegativeClampedToZero(t *testing.T) {
 	// From config.json: JSON unmarshals the negative value, then clamping zeros it.
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_cache_max_entries": -5}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchCacheMaxEntries != 0 {
 		t.Errorf("FetchCacheMaxEntries = %d, want 0 (negative clamped)", c.FetchCacheMaxEntries)
 	}
@@ -152,7 +152,7 @@ func TestFetchCacheMaxEntriesNegativeClampedToZero(t *testing.T) {
 	// From env: the env parser already guards n >= 0, so negative values are
 	// silently rejected and the default is kept.
 	t.Setenv("ZOT_WEB_FETCH_CACHE_MAX_ENTRIES", "-1")
-	c = Load("")
+	c = Load("", "")
 	if c.FetchCacheMaxEntries != 32 {
 		t.Errorf("FetchCacheMaxEntries = %d, want 32 (negative env rejected, stays default)", c.FetchCacheMaxEntries)
 	}
@@ -161,13 +161,13 @@ func TestFetchCacheMaxEntriesNegativeClampedToZero(t *testing.T) {
 func TestFetchMaxBytesZeroOrNegativeDefaults(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_max_bytes": 0}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchMaxBytes != 2<<20 {
 		t.Errorf("FetchMaxBytes = %d, want %d (zero → default)", c.FetchMaxBytes, 2<<20)
 	}
 
 	writeJSON(t, dir, `{"fetch_max_bytes": -100}`)
-	c = Load(dir)
+	c = Load(dir, "")
 	if c.FetchMaxBytes != 2<<20 {
 		t.Errorf("FetchMaxBytes = %d, want %d (negative → default)", c.FetchMaxBytes, 2<<20)
 	}
@@ -176,13 +176,13 @@ func TestFetchMaxBytesZeroOrNegativeDefaults(t *testing.T) {
 func TestFetchImageMaxBytesZeroOrNegativeDefaults(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_image_max_bytes": 0}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchImageMaxBytes != 5<<20 {
 		t.Errorf("FetchImageMaxBytes = %d, want %d (zero → default)", c.FetchImageMaxBytes, 5<<20)
 	}
 
 	writeJSON(t, dir, `{"fetch_image_max_bytes": -1}`)
-	c = Load(dir)
+	c = Load(dir, "")
 	if c.FetchImageMaxBytes != 5<<20 {
 		t.Errorf("FetchImageMaxBytes = %d, want %d (negative → default)", c.FetchImageMaxBytes, 5<<20)
 	}
@@ -191,7 +191,7 @@ func TestFetchImageMaxBytesZeroOrNegativeDefaults(t *testing.T) {
 func TestFetchTimeoutSecZeroOrNegativeDefaults(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_timeout_sec": 0}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchTimeoutSec != 25 {
 		t.Errorf("FetchTimeoutSec = %d, want 25 (zero → default)", c.FetchTimeoutSec)
 	}
@@ -205,7 +205,7 @@ func TestOversizedConfigValuesAreClamped(t *testing.T) {
 		"fetch_timeout_sec": 999,
 		"fetch_cache_max_entries": 999
 	}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchMaxBytes != MaxFetchMaxBytes {
 		t.Errorf("FetchMaxBytes = %d, want max %d", c.FetchMaxBytes, MaxFetchMaxBytes)
 	}
@@ -225,7 +225,7 @@ func TestOversizedEnvValuesAreClamped(t *testing.T) {
 	t.Setenv("ZOT_WEB_FETCH_IMAGE_MAX_BYTES", "999999999")
 	t.Setenv("ZOT_WEB_FETCH_TIMEOUT_SEC", "999")
 	t.Setenv("ZOT_WEB_FETCH_CACHE_MAX_ENTRIES", "999")
-	c := Load("")
+	c := Load("", "")
 	if c.FetchMaxBytes != MaxFetchMaxBytes || c.FetchImageMaxBytes != MaxFetchImageMaxBytes ||
 		c.FetchTimeoutSec != MaxFetchTimeoutSec || c.FetchCacheMaxEntries != MaxFetchCacheMaxEntries {
 		t.Fatalf("oversized env values not clamped: %+v", c)
@@ -235,13 +235,13 @@ func TestOversizedEnvValuesAreClamped(t *testing.T) {
 func TestFetchCacheTTLSecClamped(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_cache_ttl_sec": 999999}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchCacheTTLSec != MaxFetchCacheTTLSec {
 		t.Errorf("FetchCacheTTLSec = %d, want max %d", c.FetchCacheTTLSec, MaxFetchCacheTTLSec)
 	}
 
 	writeJSON(t, dir, `{"fetch_cache_ttl_sec": -5}`)
-	c = Load(dir)
+	c = Load(dir, "")
 	if c.FetchCacheTTLSec != 0 {
 		t.Errorf("FetchCacheTTLSec = %d, want 0 (negative clamped)", c.FetchCacheTTLSec)
 	}
@@ -250,19 +250,19 @@ func TestFetchCacheTTLSecClamped(t *testing.T) {
 func TestFetchCacheMaxBytesClampedAndDefaulted(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_cache_max_bytes": 9999999999}`)
-	if c := Load(dir); c.FetchCacheMaxBytes != MaxFetchCacheMaxBytes {
+	if c := Load(dir, ""); c.FetchCacheMaxBytes != MaxFetchCacheMaxBytes {
 		t.Errorf("FetchCacheMaxBytes = %d, want max %d", c.FetchCacheMaxBytes, MaxFetchCacheMaxBytes)
 	}
 
 	// Negative from JSON clamps to 0 (byte bound disabled); env negative is
 	// rejected by the n >= 0 guard and keeps the default.
 	writeJSON(t, dir, `{"fetch_cache_max_bytes": -1}`)
-	if c := Load(dir); c.FetchCacheMaxBytes != 0 {
+	if c := Load(dir, ""); c.FetchCacheMaxBytes != 0 {
 		t.Errorf("FetchCacheMaxBytes = %d, want 0 (negative clamped)", c.FetchCacheMaxBytes)
 	}
 
 	t.Setenv("ZOT_WEB_FETCH_CACHE_MAX_BYTES", "33554432")
-	if c := Load(""); c.FetchCacheMaxBytes != 33554432 {
+	if c := Load("", ""); c.FetchCacheMaxBytes != 33554432 {
 		t.Errorf("FetchCacheMaxBytes = %d, want 33554432 (env override)", c.FetchCacheMaxBytes)
 	}
 }
@@ -270,7 +270,7 @@ func TestFetchCacheMaxBytesClampedAndDefaulted(t *testing.T) {
 func TestEmptySearchBackendDefaultsToTavily(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"search_backend": ""}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.SearchBackend != "tavily" {
 		t.Errorf("SearchBackend = %q, want \"tavily\"", c.SearchBackend)
 	}
@@ -280,7 +280,7 @@ func TestAllowLocalHostsCommaSeparated(t *testing.T) {
 	dir := t.TempDir()
 	// A config.json key replaces the loopback defaults wholesale.
 	writeJSON(t, dir, `{"allow_local_hosts": ["one", "two"]}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if len(c.AllowLocalHosts) != 2 {
 		t.Fatalf("len = %d, want 2 (file replaces defaults)", len(c.AllowLocalHosts))
 	}
@@ -290,7 +290,7 @@ func TestAllowLocalHostsCommaSeparated(t *testing.T) {
 
 	// Env appends to file entries (uses append, not replace).
 	t.Setenv("ZOT_WEB_ALLOW_LOCAL_HOSTS", "a,b,c")
-	c = Load(dir)
+	c = Load(dir, "")
 	if len(c.AllowLocalHosts) != 5 {
 		t.Fatalf("len = %d, want 5 (file + env append)", len(c.AllowLocalHosts))
 	}
@@ -307,7 +307,7 @@ func TestAllowLocalHostsEmptyArrayOptsOut(t *testing.T) {
 	// defaults with nothing, restoring block-everything-private behavior.
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"allow_local_hosts": []}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if len(c.AllowLocalHosts) != 0 {
 		t.Errorf("AllowLocalHosts = %v, want empty (explicit [] opts out of defaults)", c.AllowLocalHosts)
 	}
@@ -327,7 +327,7 @@ func TestFetchInlineImagesBoolParsing(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Setenv("ZOT_WEB_FETCH_INLINE_IMAGES", tt.val)
-		c := Load("")
+		c := Load("", "")
 		if c.FetchInlineImages != tt.want {
 			t.Errorf("FetchInlineImages(%q) = %v, want %v", tt.val, c.FetchInlineImages, tt.want)
 		}
@@ -337,13 +337,13 @@ func TestFetchInlineImagesBoolParsing(t *testing.T) {
 func TestFetchCacheTTLSecParsing(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"fetch_cache_ttl_sec": 123}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.FetchCacheTTLSec != 123 {
 		t.Errorf("FetchCacheTTLSec = %d, want 123", c.FetchCacheTTLSec)
 	}
 
 	t.Setenv("ZOT_WEB_FETCH_CACHE_TTL_SEC", "456")
-	c = Load("")
+	c = Load("", "")
 	if c.FetchCacheTTLSec != 456 {
 		t.Errorf("FetchCacheTTLSec = %d, want 456", c.FetchCacheTTLSec)
 	}
@@ -362,7 +362,7 @@ func TestSearchBackendLowercaseNormalization(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Setenv("ZOT_WEB_SEARCH_BACKEND", tt.in)
-		c := Load("")
+		c := Load("", "")
 		if c.SearchBackend != tt.want {
 			t.Errorf("SearchBackend(%q) = %q, want %q", tt.in, c.SearchBackend, tt.want)
 		}
@@ -372,7 +372,7 @@ func TestSearchBackendLowercaseNormalization(t *testing.T) {
 func TestSearchBackendTrimSpace(t *testing.T) {
 	dir := t.TempDir()
 	writeJSON(t, dir, `{"search_backend": "  searxng  "}`)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.SearchBackend != "searxng" {
 		t.Errorf("SearchBackend = %q after TrimSpace, want \"searxng\"", c.SearchBackend)
 	}
@@ -380,7 +380,7 @@ func TestSearchBackendTrimSpace(t *testing.T) {
 
 func TestEnvFetchMaxBytesInvalidFallsBack(t *testing.T) {
 	t.Setenv("ZOT_WEB_FETCH_MAX_BYTES", "not-a-number")
-	c := Load("")
+	c := Load("", "")
 	if c.FetchMaxBytes != 2<<20 {
 		t.Errorf("FetchMaxBytes = %d, want default %d", c.FetchMaxBytes, 2<<20)
 	}
@@ -388,7 +388,7 @@ func TestEnvFetchMaxBytesInvalidFallsBack(t *testing.T) {
 
 func TestEnvFetchTimeoutSecInvalidFallsBack(t *testing.T) {
 	t.Setenv("ZOT_WEB_FETCH_TIMEOUT_SEC", "abc")
-	c := Load("")
+	c := Load("", "")
 	if c.FetchTimeoutSec != 25 {
 		t.Errorf("FetchTimeoutSec = %d, want default 25", c.FetchTimeoutSec)
 	}
@@ -397,7 +397,7 @@ func TestEnvFetchTimeoutSecInvalidFallsBack(t *testing.T) {
 func TestMalformedJSONFallsBackToDefaults(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "config.json"), []byte("{bad json!!!"), 0644)
-	c := Load(dir)
+	c := Load(dir, "")
 	if c.SearchBackend != "tavily" {
 		t.Errorf("SearchBackend = %q, want \"tavily\" (malformed JSON → defaults)", c.SearchBackend)
 	}
@@ -407,5 +407,32 @@ func writeJSON(t *testing.T, dir, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLoadFallsBackToExtensionDir: when a terva host splits data_dir from
+// the install dir, a config.json that predates the split (still in the
+// install/extension dir) must still be found. data_dir wins when both
+// have one. This keeps zot-web compatible across the host's data-dir
+// change and with the older zot protocol (where the two dirs coincide).
+func TestLoadFallsBackToExtensionDir(t *testing.T) {
+	dataDir := t.TempDir()
+	extDir := t.TempDir()
+
+	// Only the install (extension) dir has a config — the pre-split layout.
+	writeJSON(t, extDir, `{"search_backend":"searxng","searxng_url":"http://legacy.local"}`)
+	if c := Load(dataDir, extDir); c.SearchBackend != "searxng" || c.SearxngURL != "http://legacy.local" {
+		t.Fatalf("fallback to extension dir failed: backend=%q url=%q", c.SearchBackend, c.SearxngURL)
+	}
+
+	// data_dir wins when both are present (the post-migration steady state).
+	writeJSON(t, dataDir, `{"search_backend":"tavily","tavily_api_key":"tvly-new"}`)
+	c := Load(dataDir, extDir)
+	if c.SearchBackend != "tavily" || c.TavilyAPIKey != "tvly-new" {
+		t.Fatalf("data dir should win: backend=%q key=%q", c.SearchBackend, c.TavilyAPIKey)
+	}
+	// ...and the extension-dir file is NOT also merged in (first match wins).
+	if c.SearxngURL != "" {
+		t.Errorf("extension-dir config should not bleed through once data_dir has one: %q", c.SearxngURL)
 	}
 }
