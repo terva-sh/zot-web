@@ -107,3 +107,48 @@ func TestSendImageResultNoCaption(t *testing.T) {
 		t.Errorf("content = %+v, want a single image block (no empty caption)", f.Content)
 	}
 }
+
+// registerFrames runs the extension against a stdin that immediately
+// shuts it down, then returns the register_tool frames it emitted.
+func registerFrames(t *testing.T, e *Extension) []map[string]any {
+	t.Helper()
+	var out bytes.Buffer
+	e.out = &out
+	e.in = bytes.NewBufferString(`{"type":"shutdown"}` + "\n")
+	if err := e.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var frames []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n")) {
+		var f map[string]any
+		if json.Unmarshal(line, &f) == nil && f["type"] == "register_tool" {
+			frames = append(frames, f)
+		}
+	}
+	return frames
+}
+
+// TestRegisterToolReadOnly pins the backwards-compatibility contract:
+// a ReadOnly() tool emits "read_only":true, an un-annotated tool emits
+// no read_only key at all (so the frame is byte-for-byte what stock
+// zot has always received).
+func TestRegisterToolReadOnly(t *testing.T) {
+	e := New("web", "test")
+	e.Tool("web_search", "search", json.RawMessage(`{"type":"object"}`), func(json.RawMessage) Result { return Text("") }, ReadOnly())
+	e.Tool("web_fetch_raw", "save", json.RawMessage(`{"type":"object"}`), func(json.RawMessage) Result { return Text("") })
+
+	frames := registerFrames(t, e)
+	got := map[string]map[string]any{}
+	for _, f := range frames {
+		got[f["name"].(string)] = f
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 register_tool frames, got %d", len(got))
+	}
+	if ro, ok := got["web_search"]["read_only"]; !ok || ro != true {
+		t.Errorf("read-only tool frame = %v, want read_only:true", got["web_search"])
+	}
+	if _, present := got["web_fetch_raw"]["read_only"]; present {
+		t.Errorf("un-annotated tool must omit read_only entirely (zot wire compat), got %v", got["web_fetch_raw"])
+	}
+}

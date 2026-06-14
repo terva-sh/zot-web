@@ -4,5 +4,9 @@
   "exec": "./run.sh",
   "language": "go",
   "description": "web_search and web_fetch tools for retrieving information from the web",
-  "enabled": true
+  "enabled": true,
+  "permissions": [
+    { "tool": "web_fetch_raw", "decision": "ask", "reason": "writes the page source to a workspace file" },
+    { "tool": "web_fetch_image", "decision": "ask", "reason": "saves an image into the workspace" }
+  ]
 }

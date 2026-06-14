@@ -332,6 +332,49 @@ entry is one of:
 This is a precise escape hatch, not an "allow all local" switch: only the
 targets you list are exempted.
 
+## Host integration (zot and terva)
+
+This extension speaks the plain zot extension protocol, so it runs unchanged on
+both zot and [terva](https://github.com/terva-sh/terva) (a zot-compatible fork).
+On terva it also opts into two newer, additive niceties — both invisible to
+stock zot, which simply ignores the extra fields.
+
+**Read-only tools and approval modes.** The four reading tools — `web_search`,
+`web_fetch`, `web_images`, `web_links` — advertise themselves as side-effect
+free (a `read_only` hint on their registration). The two writing tools —
+`web_fetch_raw` and `web_fetch_image` — do not, because they save files into the
+workspace. terva's approval modes use that: in `--approval plan` the reading
+tools stay available (so a planning/research session can browse) while the
+writing tools are withheld, and in `--approval auto-edit` the reading tools run
+without a prompt. On zot the hint is ignored and all six behave as before.
+
+**A bundled research skill.** The repo ships `skills/web-research/SKILL.md`,
+which terva discovers automatically once the extension is installed — a routine
+for chaining search → read → links/images with citations. (zot does not load
+extension-bundled skills; it's a no-op there.)
+
+**Confirm-before-write, by default (terva).** The manifest ships a small,
+restrict-only permission contribution: `web_fetch_raw` and `web_fetch_image`
+default to **ask** before they run, because they write files into your
+workspace. terva honors that even in `--approval yolo`, so installing the
+extension can't quietly start writing files. An extension may only ever
+*tighten* the policy this way (it can never `allow` itself a tool — only your
+own config can grant), and your config wins: if you trust the writers, add an
+`allow` to `$TERVA_HOME/config.json` and it overrides the manifest default —
+
+```json
+{
+  "permissions": [
+    { "tool": "web_fetch_raw",   "decision": "allow" },
+    { "tool": "web_fetch_image", "decision": "allow" }
+  ]
+}
+```
+
+The four reading tools carry no manifest rule; they follow your approval mode
+(allowed outright in `yolo`/`auto-edit`, prompted in `ask`). On zot the
+`permissions` key is an unknown manifest field and is simply ignored.
+
 ## Roadmap
 
 - [x] Replace the heuristic HTML extractor with readability +

@@ -65,7 +65,20 @@ type toolDef struct {
 	description string
 	schema      json.RawMessage
 	handler     ToolHandler
+	readOnly    bool
 }
+
+// ToolOption configures a tool at registration time.
+type ToolOption func(*toolDef)
+
+// ReadOnly marks a tool as side-effect free. Hosts that understand the
+// hint (terva's read_only / the MCP readOnlyHint analog) may admit the
+// tool in read-only approval modes such as "plan"; hosts that don't
+// (stock zot) ignore the extra field, so this stays backwards
+// compatible. Only mark a tool that never mutates the workspace or the
+// outside world under any arguments — the hint is per-tool, not
+// per-call.
+func ReadOnly() ToolOption { return func(t *toolDef) { t.readOnly = true } }
 
 // CommandResult is a slash-command handler's reply. Action selects how zot
 // renders Text: "display" (one-shot styled note in the chat), "prompt"
@@ -124,10 +137,15 @@ func New(name, version string) *Extension {
 }
 
 // Tool registers an LLM-callable tool. Call before Run. schema is a JSON Schema
-// object (same shape Anthropic/OpenAI accept).
-func (e *Extension) Tool(name, description string, schema json.RawMessage, h ToolHandler) {
+// object (same shape Anthropic/OpenAI accept). Pass options such as
+// ReadOnly() to annotate the tool.
+func (e *Extension) Tool(name, description string, schema json.RawMessage, h ToolHandler, opts ...ToolOption) {
+	t := toolDef{name: name, description: description, schema: schema, handler: h}
+	for _, opt := range opts {
+		opt(&t)
+	}
 	e.mu.Lock()
-	e.tools = append(e.tools, toolDef{name, description, schema, h})
+	e.tools = append(e.tools, t)
 	e.mu.Unlock()
 }
 
@@ -187,10 +205,17 @@ func (e *Extension) Run() error {
 		"capabilities": caps,
 	})
 	for _, t := range tools {
-		e.send(map[string]any{
+		frame := map[string]any{
 			"type": "register_tool", "name": t.name,
 			"description": t.description, "schema": t.schema,
-		})
+		}
+		// Emit read_only only when set, so a non-annotated tool's
+		// frame is byte-identical to what every zot host has always
+		// received — the hint is purely additive.
+		if t.readOnly {
+			frame["read_only"] = true
+		}
+		e.send(frame)
 	}
 	for _, c := range commands {
 		e.send(map[string]any{
