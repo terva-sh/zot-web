@@ -9,6 +9,11 @@ import? 'release.just'
 # Default SearXNG instance for `just configure-searxng` (override by passing a URL).
 SEARXNG_URL := "http://127.0.0.1:11984"
 
+# Harness to install into: "terva" (our fork, the default) or "zot" (upstream).
+# Their `ext` CLIs are API-compatible. Pass per-recipe (`just install zot`) or
+# override globally (`just HOST=zot configure-searxng`).
+HOST := "terva"
+
 default:
     @just --list
 
@@ -31,15 +36,17 @@ vendor:
     go mod vendor
     @echo "vendor/ refreshed — commit it alongside go.mod/go.sum"
 
-# Build, then (re)install into $ZOT_HOME so the latest binary is loaded.
-# Preserves an existing config.json across the reinstall.
-install: build
+# Build, then (re)install into the host's extensions dir ($TERVA_HOME or
+# $ZOT_HOME) so the latest binary is loaded. Preserves an existing config.json.
+# Installs into terva by default; `just install zot` targets upstream.
+install host=HOST: build
     #!/usr/bin/env bash
     set -euo pipefail
+    host="{{host}}"
     name="$(basename "$PWD")"
-    # Install dir is the last column of `zot ext list`; the path can contain
+    # Install dir is the last column of `ext list`; the path can contain
     # spaces, so take everything from the first '/'.
-    resolve_dir() { local l; l="$(zot ext list | grep -E "/${name}\$" || true)"; [[ -n "$l" ]] && printf '/%s' "${l#*/}"; }
+    resolve_dir() { local l; l="$("$host" ext list | grep -E "/${name}\$" || true)"; [[ -n "$l" ]] && printf '/%s' "${l#*/}"; }
 
     # Stash the current config.json (if any) before remove wipes the dir.
     saved=""
@@ -49,12 +56,12 @@ install: build
       echo "preserving existing config.json"
     fi
 
-    zot ext remove "$name" -y || true                 # -y skips the confirm; matches the dir basename
-    zot ext install "$PWD"
+    "$host" ext remove "$name" -y || true             # -y skips the confirm; matches the dir basename
+    "$host" ext install "$PWD"
 
     dir="$(resolve_dir || true)"
-    [[ -n "$dir" ]] || { echo "install: could not find installed dir in 'zot ext list'" >&2; exit 1; }
-    # `zot ext install` copies git-aware and skips .gitignore'd files — which
+    [[ -n "$dir" ]] || { echo "install: could not find installed dir in '$host ext list'" >&2; exit 1; }
+    # `ext install` copies git-aware and skips .gitignore'd files — which
     # includes the built ./zot-web binary (extension.json's exec target). Copy it
     # in explicitly so the installed extension can actually run.
     cp -f zot-web "$dir/zot-web"
@@ -64,21 +71,22 @@ install: build
       cp "$saved" "$dir/config.json"; rm -f "$saved"
       echo "restored config.json"
     fi
-    zot ext list
+    "$host" ext list
 
 # Point the installed extension at a SearXNG backend (default: SEARXNG_URL).
-configure-searxng url=SEARXNG_URL:
+configure-searxng url=SEARXNG_URL host=HOST:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Resolve the installed data dir from `zot ext list` — portable across OSes
-    # and a custom $ZOT_HOME. The dir is the last column; the path may contain
-    # spaces, so take everything from the first '/'. URL defaults to SEARXNG_URL;
-    # pass one to override (a bare host:port gets an http:// prefix).
+    # Resolve the installed data dir from `ext list` — portable across OSes
+    # and a custom $TERVA_HOME/$ZOT_HOME. The dir is the last column; the path
+    # may contain spaces, so take everything from the first '/'. URL defaults to
+    # SEARXNG_URL; pass one to override (a bare host:port gets an http:// prefix).
     url="{{url}}"
     [[ "$url" == *://* ]] || url="http://$url"
+    host="{{host}}"
     name="$(basename "$PWD")"
-    line="$(zot ext list | grep -E "/${name}\$" || true)"
-    [[ -n "$line" ]] || { echo "extension not installed; run \`just install\` first" >&2; exit 1; }
+    line="$("$host" ext list | grep -E "/${name}\$" || true)"
+    [[ -n "$line" ]] || { echo "extension not installed in $host; run \`just install\` first" >&2; exit 1; }
     dir="/${line#*/}"
 
     host="${url#*://}"; host="${host%%/*}"; host="${host%@*}"
@@ -122,9 +130,9 @@ ci: lint
     go mod vendor
     git diff --exit-code -- go.mod go.sum vendor/
 
-# Build and load into a one-off zot session for manual testing.
-try DIR=".": build
-    zot --ext "$PWD" --cwd "{{DIR}}"
+# Build and load into a one-off host session for manual testing.
+try DIR="." host=HOST: build
+    {{host}} --ext "$PWD" --cwd "{{DIR}}"
 
 # Print the version string the binary would report, built from source.
 version:
