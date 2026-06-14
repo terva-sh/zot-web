@@ -407,7 +407,8 @@ func (c *Client) downloadOnce(ctx context.Context, u *url.URL, maxBytes int64, u
 	if err != nil {
 		return fetched{}, err
 	}
-	req.Header.Set("User-Agent", resolveUserAgent(userAgent, c.userAgent))
+	ua := resolveUserAgent(userAgent, c.userAgent)
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
 
 	resp, err := c.http.Do(req)
@@ -416,7 +417,7 @@ func (c *Client) downloadOnce(ctx context.Context, u *url.URL, maxBytes int64, u
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fetched{}, &HTTPStatusError{Status: resp.StatusCode, URL: u.String()}
+		return fetched{}, &HTTPStatusError{Status: resp.StatusCode, URL: u.String(), BrowserUA: ua == browserUserAgent}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
@@ -441,13 +442,21 @@ func (c *Client) downloadOnce(ctx context.Context, u *url.URL, maxBytes int64, u
 type HTTPStatusError struct {
 	Status int
 	URL    string
+	// BrowserUA records whether the request already went out with the
+	// browser user_agent, so the 401/403 hint doesn't suggest a retry that
+	// was just tried.
+	BrowserUA bool
 }
 
 func (e *HTTPStatusError) Error() string {
 	hint := "client error"
 	switch {
 	case e.Status == 401 || e.Status == 403:
-		hint = `access denied — the site may be blocking automated clients; retry with user_agent: "browser", or try another source`
+		if e.BrowserUA {
+			hint = "access denied — the site is blocking this fetch even with the browser user_agent; try another source"
+		} else {
+			hint = `access denied — the site may be blocking automated clients; retry with user_agent: "browser", or try another source`
+		}
 	case e.Status == 404 || e.Status == 410:
 		hint = "page not found — check the URL; the page may have moved or been removed"
 	case e.Status == 429:
@@ -485,7 +494,9 @@ func classifyFetchError(err error) error {
 	s := err.Error()
 	switch {
 	case strings.Contains(s, "stopped after") && strings.Contains(s, "redirects"):
-		return fmt.Errorf("redirect loop: %w", err)
+		// Go's client says "stopped after N redirects" when the cap is hit —
+		// that's a chain that ran too long, not necessarily a loop.
+		return fmt.Errorf("too many redirects: %w", err)
 	case strings.Contains(s, "no such host"), strings.Contains(s, "server misbehaving"),
 		strings.Contains(s, "name resolution"):
 		return fmt.Errorf("dns error: %w", err)

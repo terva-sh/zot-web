@@ -39,6 +39,9 @@ func FormatImages(pageURL string, imgs []Image) string {
 		if d := im.dimensions(); d != "" {
 			fmt.Fprintf(&b, " (%s)", d)
 		}
+		if im.isSVG() {
+			b.WriteString("\n   svg — web_fetch_image cannot decode it; web_fetch_raw can save the source")
+		}
 		alt := oneLine(im.Alt)
 		if alt != "" {
 			fmt.Fprintf(&b, "\n   alt: %s", alt)
@@ -51,6 +54,19 @@ func FormatImages(pageURL string, imgs []Image) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// isSVG reports whether the image URL's path points at an SVG — vector markup
+// web_fetch_image deliberately doesn't decode (XML parsing is attack surface,
+// and there's no stdlib rasterizer). Extension-based and best-effort: an SVG
+// behind an extension-less URL still gets the clear unsupported-content error
+// at fetch time.
+func (im Image) isSVG() bool {
+	p, err := url.Parse(im.URL)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(p.Path), ".svg")
 }
 
 // dimensions renders "W×H" when both are known.

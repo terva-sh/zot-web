@@ -116,6 +116,54 @@ func TestSaveToWorkspaceRejectsFinalSymlink(t *testing.T) {
 	}
 }
 
+func TestCheckSavePathMatchesSavePolicy(t *testing.T) {
+	cwd := t.TempDir()
+	for _, p := range []string{"../escape.png", "a/../../escape.png", "/etc/passwd", ".git/config"} {
+		if err := checkSavePath(cwd, p, false); err == nil {
+			t.Errorf("preflight should reject %q", p)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "f.png"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSavePath(cwd, "f.png", false); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("preflight no-clobber: err = %v", err)
+	}
+	if err := checkSavePath(cwd, "f.png", true); err != nil {
+		t.Errorf("preflight with overwrite should pass: %v", err)
+	}
+	if err := checkSavePath(cwd, "new/dir/f.png", false); err != nil {
+		t.Errorf("preflight of a fresh nested path should pass: %v", err)
+	}
+}
+
+func TestCheckSavePathHasNoSideEffects(t *testing.T) {
+	cwd := t.TempDir()
+	if err := checkSavePath(cwd, "a/b/c.png", false); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "a")); !os.IsNotExist(err) {
+		t.Error("preflight created parent directories")
+	}
+}
+
+func TestCheckSavePathRejectsSymlinks(t *testing.T) {
+	cwd := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, "out")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := checkSavePath(cwd, "out/file.txt", false); err == nil {
+		t.Error("preflight should reject a symlinked parent")
+	}
+	if err := os.Symlink(filepath.Join(outside, "t.txt"), filepath.Join(cwd, "link.txt")); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	if err := checkSavePath(cwd, "link.txt", true); err == nil {
+		t.Error("preflight should reject a symlink target")
+	}
+}
+
 func TestVersionString(t *testing.T) {
 	got := versionString()
 	if !strings.HasPrefix(got, "zot-web "+version.Version) {

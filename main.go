@@ -270,6 +270,9 @@ func main() {
 			if strings.TrimSpace(in.SavePath) == "" {
 				return proto.Errorf("save_path is required")
 			}
+			if err := checkSavePath(e.Host().CWD, in.SavePath, in.Overwrite); err != nil {
+				return proto.Errorf("invalid save_path (nothing was fetched): %v", err)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 			defer cancel()
 			raw, err := fetcher.Raw(ctx, in.URL, in.UserAgent)
@@ -313,6 +316,11 @@ func main() {
 			}
 			if strings.TrimSpace(in.URL) == "" {
 				return proto.Errorf("url is required")
+			}
+			if strings.TrimSpace(in.SavePath) != "" {
+				if err := checkSavePath(e.Host().CWD, in.SavePath, in.Overwrite); err != nil {
+					return proto.Errorf("invalid save_path (nothing was fetched): %v", err)
+				}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 			defer cancel()
@@ -397,53 +405,75 @@ func versionString() string {
 	return fmt.Sprintf("zot-web %s (%s, %s/%s)", version.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
-// saveToWorkspace writes data to savePath resolved under the workspace cwd. It
-// refuses absolute paths, lexical/symlink escapes, writes through symlinks, and
-// .git/ targets; creates parent directories within the workspace; and (unless
-// overwrite) refuses to clobber an existing file. Returns the cleaned
-// workspace-relative path written.
-func saveToWorkspace(cwd, savePath string, data []byte, overwrite bool) (string, error) {
+// resolveSavePath validates savePath under the workspace cwd and returns the
+// absolute write target plus the cleaned workspace-relative path. It refuses
+// absolute paths, lexical/symlink escapes, writes through symlinks, .git/
+// targets, and (unless overwrite) an existing file. With mkdir, missing parent
+// directories are created (write time); without it nothing is touched, so the
+// write tools can run the same policy as a preflight BEFORE the network fetch.
+func resolveSavePath(cwd, savePath string, overwrite, mkdir bool) (target, rel string, err error) {
 	if strings.TrimSpace(cwd) == "" {
-		return "", fmt.Errorf("no workspace directory available to save into")
+		return "", "", fmt.Errorf("no workspace directory available to save into")
 	}
 	if filepath.IsAbs(savePath) {
-		return "", fmt.Errorf("save_path must be relative to the workspace, not absolute")
+		return "", "", fmt.Errorf("save_path must be relative to the workspace, not absolute")
 	}
 	root, err := filepath.Abs(cwd)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	rootReal, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", fmt.Errorf("workspace directory is not accessible: %w", err)
+		return "", "", fmt.Errorf("workspace directory is not accessible: %w", err)
 	}
-	target := filepath.Join(root, filepath.Clean(savePath))
-	rel, err := filepath.Rel(root, target)
+	target = filepath.Join(root, filepath.Clean(savePath))
+	rel, err = filepath.Rel(root, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("save_path escapes the workspace")
+		return "", "", fmt.Errorf("save_path escapes the workspace")
 	}
 	// Refuse writes into .git/ — a prompt-injected model could overwrite
 	// .git/config or other control files.
 	if strings.HasPrefix(rel, ".git"+string(filepath.Separator)) || rel == ".git" {
-		return "", fmt.Errorf("writing to .git/ is not permitted")
+		return "", "", fmt.Errorf("writing to .git/ is not permitted")
 	}
-	if err := mkdirAllNoSymlink(root, rootReal, filepath.Dir(rel)); err != nil {
-		return "", err
+	if err := walkParentsNoSymlink(root, rootReal, filepath.Dir(rel), mkdir); err != nil {
+		return "", "", err
 	}
 	if st, err := os.Lstat(target); err == nil {
 		if st.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("save_path points to a symlink, which is not permitted")
+			return "", "", fmt.Errorf("save_path points to a symlink, which is not permitted")
 		}
 		if !overwrite {
-			return "", fmt.Errorf("%s already exists (set overwrite=true to replace it)", rel)
+			return "", "", fmt.Errorf("%s already exists (set overwrite=true to replace it)", rel)
 		}
 	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+	return target, rel, nil
+}
+
+// checkSavePath is the preflight: every saveToWorkspace policy check that
+// needs no fetched data, with no filesystem side effects. Run before the
+// fetch so a bad save_path fails without network traffic; saveToWorkspace
+// re-validates at write time (the gap between preflight and write is real).
+func checkSavePath(cwd, savePath string, overwrite bool) error {
+	_, _, err := resolveSavePath(cwd, savePath, overwrite, false)
+	return err
+}
+
+// saveToWorkspace writes data to savePath resolved under the workspace cwd,
+// enforcing the resolveSavePath policy and creating parent directories within
+// the workspace. Returns the cleaned workspace-relative path written.
+func saveToWorkspace(cwd, savePath string, data []byte, overwrite bool) (string, error) {
+	target, rel, err := resolveSavePath(cwd, savePath, overwrite, true)
+	if err != nil {
 		return "", err
 	}
-	// O_NOFOLLOW closes the TOCTOU between the Lstat symlink check above and this
-	// open: even if a symlink is swapped into place in that window, the kernel
-	// refuses to follow it for the final path component (overwrite uses O_TRUNC,
-	// which would otherwise write through a symlink). oNoFollow is 0 on Windows.
+	// O_NOFOLLOW closes the TOCTOU between resolveSavePath's Lstat symlink check
+	// and this open: even if a symlink is swapped into place in that window, the
+	// kernel refuses to follow it for the final path component (overwrite uses
+	// O_TRUNC, which would otherwise write through a symlink). oNoFollow is 0 on
+	// Windows.
 	flag := os.O_WRONLY | os.O_CREATE | oNoFollow
 	if overwrite {
 		flag |= os.O_TRUNC
@@ -464,10 +494,13 @@ func saveToWorkspace(cwd, savePath string, data []byte, overwrite bool) (string,
 	return rel, nil
 }
 
-// mkdirAllNoSymlink creates relDir below root and rejects symlinked parent
-// components. This keeps model-triggered saves from escaping the workspace via
-// pre-existing symlinks such as "workspace/out -> /tmp/out".
-func mkdirAllNoSymlink(root, rootReal, relDir string) error {
+// walkParentsNoSymlink walks relDir's components below root and rejects
+// symlinked parents and symlink escapes. This keeps model-triggered saves from
+// escaping the workspace via pre-existing symlinks such as
+// "workspace/out -> /tmp/out". With create, missing components are made along
+// the way (mkdir -p); without it the walk stops at the first missing component
+// — nothing deeper can exist, and a preflight must not touch the filesystem.
+func walkParentsNoSymlink(root, rootReal, relDir string, create bool) error {
 	if relDir == "." || relDir == "" {
 		return nil
 	}
@@ -479,6 +512,9 @@ func mkdirAllNoSymlink(root, rootReal, relDir string) error {
 		cur = filepath.Join(cur, elem)
 		st, err := os.Lstat(cur)
 		if os.IsNotExist(err) {
+			if !create {
+				return nil
+			}
 			if err := os.Mkdir(cur, 0o755); err != nil && !os.IsExist(err) {
 				return err
 			}

@@ -39,6 +39,24 @@ func TestFormatImagesCapNote(t *testing.T) {
 	}
 }
 
+func TestFormatImagesAnnotatesSVG(t *testing.T) {
+	imgs := []Image{
+		{ID: 1, URL: "https://example.com/logo.SVG?v=2"},
+		{ID: 2, URL: "https://example.com/photo.png"},
+	}
+	out := FormatImages("https://example.com", imgs)
+	lines := strings.Split(out, "\n")
+	var svgNotes int
+	for _, l := range lines {
+		if strings.Contains(l, "web_fetch_image cannot decode") {
+			svgNotes++
+		}
+	}
+	if svgNotes != 1 {
+		t.Errorf("want exactly 1 svg note (case-insensitive ext, query ignored; none for png), got %d in:\n%s", svgNotes, out)
+	}
+}
+
 // TestFetchHeaderNotesMarkdownCap serves a plain-text body longer than the
 // render cap and asserts the fetch metadata block calls out the dropped tail.
 func TestFetchHeaderNotesMarkdownCap(t *testing.T) {

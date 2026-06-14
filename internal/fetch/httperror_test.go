@@ -32,6 +32,31 @@ func TestHTTPStatusErrorHints(t *testing.T) {
 	}
 }
 
+func TestHTTPStatusErrorBrowserUAHint(t *testing.T) {
+	msg := (&HTTPStatusError{Status: 403, URL: "https://example.com/x", BrowserUA: true}).Error()
+	if strings.Contains(msg, `retry with user_agent`) {
+		t.Errorf("browser-UA 403 must not suggest the retry that was just tried: %q", msg)
+	}
+	if !strings.Contains(msg, "even with the browser user_agent") {
+		t.Errorf("browser-UA 403 should say the browser UA was already used: %q", msg)
+	}
+}
+
+func TestForbiddenHintReflectsUserAgentUsed(t *testing.T) {
+	srv, _ := statusServer(t, http.StatusForbidden, 99)
+	c := New(config.Config{FetchMaxBytes: 1 << 20, FetchTimeoutSec: 10}, ParseAllowList([]string{"127.0.0.1"}))
+
+	_, err := c.Fetch(context.Background(), srv.URL, 200, 0, "")
+	if err == nil || !strings.Contains(err.Error(), `retry with user_agent: "browser"`) {
+		t.Fatalf("default-UA 403 should suggest the browser retry, got: %v", err)
+	}
+
+	_, err = c.Fetch(context.Background(), srv.URL, 200, 0, "browser")
+	if err == nil || strings.Contains(err.Error(), `retry with user_agent`) {
+		t.Fatalf("browser-UA 403 must not suggest the browser retry, got: %v", err)
+	}
+}
+
 // statusServer fails the first n requests with status, then serves a page.
 func statusServer(t *testing.T, status int, failures int32) (*httptest.Server, *int32) {
 	t.Helper()
