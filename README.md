@@ -437,3 +437,7 @@ The four reading tools carry no manifest rule; they follow your approval mode
       gate on every push, and a goreleaser snapshot on `main`.
 - [ ] Teach `run.sh` / the install flow to consume those prebuilt archives, so
       a plain `zot ext install <git-url>` also skips the on-host build.
+
+## License
+
+[MIT](LICENSE) © 2026 Drew Short
