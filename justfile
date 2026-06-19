@@ -122,9 +122,16 @@ fmt:
 test *ARGS:
     go test ./... {{ARGS}}
 
+# Protocol conformance: build ./zot-web and drive it over stdio as both an
+# upstream-zot host and a terva host. Tagged out of the default `test` run
+# because it shells out to `go build`.
+conformance:
+    go test -tags conformance -run Conformance -v .
+
 # Everything the Forgejo CI gate runs (.forgejo/workflows/ci.yml mirrors this).
 ci: lint
     go test -race ./...
+    just conformance
     go mod vendor
     git diff --exit-code -- go.mod go.sum vendor/
 
