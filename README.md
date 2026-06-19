@@ -98,6 +98,56 @@ pre-seeding it so the first launch skips the build. The install dir is named
 after the source folder's basename (here, `zot-web`), not the manifest `name`
 (`web`); `zot --ext` runs from the working copy directly.
 
+## terva compatibility
+
+[terva](https://github.com/terva-sh) is a **hard fork of zot**: it started from
+zot's codebase and has grown into its own project — hardening and expanding a
+minimal agentic harness — evolving *alongside* zot, not replacing or renaming
+it. As part of that lineage terva deliberately keeps zot's extension wire
+protocol, so this extension loads and runs on terva unchanged — the same
+`--ext` and `ext install` flows work with `terva` in place of `zot`, and config
+resolves from the host-provided `data_dir` (so `$ZOT_HOME` vs `$TERVA_HOME` is
+invisible here):
+
+```bash
+terva --ext /path/to/zot-web      # one session from the working copy
+terva ext install /path/to/zot-web
+terva ext logs web                # the extension's stderr log
+```
+
+The protocol layer is **host-aware**: `hello_ack` carries a `terva_version`
+field only on a terva host, which `proto.Host.IsTerva()` exposes as the
+zot-vs-terva discriminator (presence, not a version comparison). On terva the
+tools register with `authority: "network-read"` so the host gates them
+correctly (prompted in workspace/auto-edit, refused in plan); upstream zot
+hosts ignore the unknown field and keep treating the tools as prompt-gated.
+The extension's own SSRF guard (below) is unchanged — it stays defense-in-depth
+alongside terva's host egress guard, since the extension fetches in its own
+process.
+
+It speaks **protocol version 2** (`internal/proto` matches terva's
+`extproto.ProtocolVersion`): it subscribes to the `session_start` event and
+tracks the live session identity terva sends — `session_id`, `project_id`, and
+a `cwd` that **follows `/cd`** and session switches. The file-saving tools
+(`web_fetch_raw`, `web_fetch_image`) resolve workspace paths against that live
+cwd (`e.CWD()`) instead of the launch cwd frozen at the handshake, so saves
+land in the directory you're actually in. Protocol 2 is adopted
+*opportunistically*: the extension declares **no `min_protocol`**, so a
+pre-v2 (protocol-1) zot host still loads it and simply never fires
+`session_start` — the cwd then falls back to the handshake value. Nothing here
+requires terva.
+
+This follows terva's **optimistic protocol-adoption** convention — speak the
+newest revision you implement, presence-gate its features, degrade instead of
+demanding, and reserve `min_protocol` for genuine correctness floors. The
+principle is documented for all extension authors in terva's
+`write-terva-extension` skill (*Protocol version negotiation*); zot-web's
+`internal/proto` is the worked reference.
+
+**Naming:** the wire/installed identifiers stay `zot-*` (registers as `web`,
+binary/repo `zot-web`) — they're just strings on the wire, and stability beats
+churn. No `terva-web` rename.
+
 ### Dependencies are vendored
 
 `vendor/` is committed so the first-launch build is fast and offline (see
@@ -370,15 +420,6 @@ both zot and [terva](https://github.com/terva-sh/terva) (a zot-compatible fork).
 On terva it also opts into two newer, additive niceties — both invisible to
 stock zot, which simply ignores the extra fields.
 
-**Read-only tools and approval modes.** The four reading tools — `web_search`,
-`web_fetch`, `web_images`, `web_links` — advertise themselves as side-effect
-free (a `read_only` hint on their registration). The two writing tools —
-`web_fetch_raw` and `web_fetch_image` — do not, because they save files into the
-workspace. terva's approval modes use that: in `--approval plan` the reading
-tools stay available (so a planning/research session can browse) while the
-writing tools are withheld, and in `--approval auto-edit` the reading tools run
-without a prompt. On zot the hint is ignored and all six behave as before.
-
 **A bundled research skill.** The repo ships `skills/web-research/SKILL.md`,
 which terva discovers automatically once the extension is installed — a routine
 for chaining search → read → links/images with citations. (zot does not load
@@ -402,9 +443,9 @@ own config can grant), and your config wins: if you trust the writers, add an
 }
 ```
 
-The four reading tools carry no manifest rule; they follow your approval mode
-(allowed outright in `yolo`/`auto-edit`, prompted in `ask`). On zot the
-`permissions` key is an unknown manifest field and is simply ignored.
+The four reading tools carry no manifest rule; their `network-read` authority
+gates them instead (prompted in `workspace`/`auto-edit`, refused in `plan`). On
+zot the `permissions` key is an unknown manifest field and is simply ignored.
 
 ## Roadmap
 

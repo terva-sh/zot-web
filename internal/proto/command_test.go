@@ -74,7 +74,7 @@ func TestRunDispatchesCommand(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	for _, want := range []string{
-		`"capabilities":["tools","commands"]`,
+		`"capabilities":["tools","events","commands"]`,
 		`"type":"register_command"`,
 		`"name":"web-cache"`,
 		`"type":"command_response"`,

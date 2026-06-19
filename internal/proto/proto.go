@@ -19,10 +19,22 @@ import (
 	"sync"
 )
 
-// ProtocolVersion is the zot extension protocol version this package speaks. It
-// is sent by the host in hello_ack; a mismatch is logged (not fatal) so the
-// extension keeps working against minor host changes while surfacing a drift.
-const ProtocolVersion = 1
+// ProtocolVersion is the newest wire revision whose frames this package
+// handles, tracking terva's extproto.ProtocolVersion:
+//
+//	1 — baseline: tool_result fanout, crash surfacing, min-protocol negotiation.
+//	2 — session identity: a session_start event carrying session_id/path/title
+//	    plus a live cwd/project_id that follow /cd and session switches.
+//
+// An extension announces no protocol version on the wire: the host's
+// protocol_version arrives in hello_ack, and the extension's only lever is an
+// optional min_protocol floor in its hello. We deliberately send NO
+// min_protocol, so an older (protocol-1) zot host still loads this extension;
+// protocol 2's additions are adopted opportunistically, not required. This
+// constant is a local yardstick only — it gates the drift note below (we log a
+// host NEWER than this, and degrade against older ones by simply not receiving
+// the v2 frames).
+const ProtocolVersion = 2
 
 // Result is a tool handler's reply. Text is sent back to the model as a text
 // content block; Image, when set, is sent as an image content block (before the
@@ -65,20 +77,26 @@ type toolDef struct {
 	description string
 	schema      json.RawMessage
 	handler     ToolHandler
-	readOnly    bool
+	authority   string
 }
 
-// ToolOption configures a tool at registration time.
+// ToolOption configures a tool at registration time. Pass options as trailing
+// arguments to Tool.
 type ToolOption func(*toolDef)
 
-// ReadOnly marks a tool as side-effect free. Hosts that understand the
-// hint (terva's read_only / the MCP readOnlyHint analog) may admit the
-// tool in read-only approval modes such as "plan"; hosts that don't
-// (stock zot) ignore the extra field, so this stays backwards
-// compatible. Only mark a tool that never mutates the workspace or the
-// outside world under any arguments — the hint is per-tool, not
-// per-call.
-func ReadOnly() ToolOption { return func(t *toolDef) { t.readOnly = true } }
+// WithAuthority declares a tool's authority class, mirroring terva's
+// ext.WithAuthority. terva uses it to gate the tool (only "local-read" is
+// auto-allowable; everything else prompts or is refused per mode). The field is
+// sent on register_tool; upstream zot hosts ignore the unknown field, so it is
+// safe to set unconditionally.
+func WithAuthority(class string) ToolOption {
+	return func(t *toolDef) { t.authority = class }
+}
+
+// NetworkRead marks a tool as one that reads from the network — the correct
+// class for fetch/search tools. On a terva host this makes the tool prompt in
+// workspace/auto-edit and be refused in plan, rather than auto-allowed.
+func NetworkRead() ToolOption { return WithAuthority("network-read") }
 
 // CommandResult is a slash-command handler's reply. Action selects how zot
 // renders Text: "display" (one-shot styled note in the chat), "prompt"
@@ -108,11 +126,36 @@ type commandDef struct {
 type Host struct {
 	ProtocolVersion int
 	ZotVersion      string
+	TervaVersion    string
 	DataDir         string
 	ExtensionDir    string
 	Provider        string
 	Model           string
 	CWD             string
+}
+
+// IsTerva reports whether the host is terva rather than upstream zot. terva is
+// a hard fork of zot that keeps zot's extension wire protocol; its hello_ack
+// adds a terva_version field (sent only by terva) while still sending
+// zot_version so plain zot extensions keep working. That added field's
+// presence — not a version comparison — is the robust zot-vs-terva
+// discriminator.
+func (h Host) IsTerva() bool { return h.TervaVersion != "" }
+
+// Session carries the active-session identity a protocol-2 host sends on a
+// session_start event. It is empty until such an event arrives: a pre-v2 zot
+// host never fires one, and even on terva there is no session under
+// --no-session. Unlike Host (frozen at the handshake), these fields refresh on
+// every session_start — a session switch (/sessions resume, fork, /new) or a
+// /cd — so CWD tracks the live working directory instead of the launch cwd.
+// ProjectID is the host's stable, collision-proof key for CWD, for scoping
+// per-project state.
+type Session struct {
+	ID        string
+	Path      string
+	Title     string
+	CWD       string
+	ProjectID string
 }
 
 // Extension is one tool-providing extension. Construct with New, register
@@ -129,6 +172,7 @@ type Extension struct {
 	tools    []toolDef
 	commands []commandDef
 	host     Host
+	session  Session
 }
 
 // New constructs an Extension that talks to zot over stdin/stdout.
@@ -137,16 +181,35 @@ func New(name, version string) *Extension {
 }
 
 // Tool registers an LLM-callable tool. Call before Run. schema is a JSON Schema
-// object (same shape Anthropic/OpenAI accept). Pass options such as
-// ReadOnly() to annotate the tool.
+// object (same shape Anthropic/OpenAI accept).
 func (e *Extension) Tool(name, description string, schema json.RawMessage, h ToolHandler, opts ...ToolOption) {
-	t := toolDef{name: name, description: description, schema: schema, handler: h}
+	td := toolDef{name: name, description: description, schema: schema, handler: h}
 	for _, opt := range opts {
-		opt(&t)
+		opt(&td)
 	}
 	e.mu.Lock()
-	e.tools = append(e.tools, t)
+	e.tools = append(e.tools, td)
 	e.mu.Unlock()
+}
+
+// ToolInfo is metadata for a registered tool, returned by Tools for
+// introspection and testing (e.g. asserting every network tool declares its
+// authority).
+type ToolInfo struct {
+	Name        string
+	Description string
+	Authority   string
+}
+
+// Tools returns metadata for the registered tools, in registration order.
+func (e *Extension) Tools() []ToolInfo {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]ToolInfo, len(e.tools))
+	for i, t := range e.tools {
+		out[i] = ToolInfo{Name: t.name, Description: t.description, Authority: t.authority}
+	}
+	return out
 }
 
 // Command registers a user-invocable slash command. Call before Run.
@@ -173,6 +236,30 @@ func (e *Extension) Host() Host {
 	return e.host
 }
 
+// Session returns the active session a protocol-2 host last reported via
+// session_start. Zero value on a pre-v2 host, or before the first session opens
+// (the host guarantees session_start arrives before that session's first
+// tool_call, so a tool handler sees the current session).
+func (e *Extension) Session() Session {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.session
+}
+
+// CWD returns the working directory to resolve workspace-relative paths
+// against: the live session cwd when a protocol-2 host has sent one (it follows
+// /cd), else the launch cwd frozen in the hello_ack. Tool handlers that write
+// files should use this rather than Host().CWD so saves land in the user's
+// current directory after a /cd.
+func (e *Extension) CWD() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.session.CWD != "" {
+		return e.session.CWD
+	}
+	return e.host.CWD
+}
+
 // Logf writes a debug line to stderr, which zot captures to
 // $ZOT_HOME/logs/ext-<name>.log. Never write to stdout — that's the wire.
 func (e *Extension) Logf(format string, a ...any) {
@@ -196,7 +283,7 @@ func (e *Extension) Run() error {
 	tools := append([]toolDef(nil), e.tools...)
 	commands := append([]commandDef(nil), e.commands...)
 	e.mu.Unlock()
-	caps := []string{"tools"}
+	caps := []string{"tools", "events"}
 	if len(commands) > 0 {
 		caps = append(caps, "commands")
 	}
@@ -209,11 +296,11 @@ func (e *Extension) Run() error {
 			"type": "register_tool", "name": t.name,
 			"description": t.description, "schema": t.schema,
 		}
-		// Emit read_only only when set, so a non-annotated tool's
-		// frame is byte-identical to what every zot host has always
-		// received — the hint is purely additive.
-		if t.readOnly {
-			frame["read_only"] = true
+		// Sent unconditionally: registration happens before hello_ack arrives,
+		// so the host's identity isn't known yet. terva consumes authority;
+		// upstream zot hosts ignore the unknown field harmlessly.
+		if t.authority != "" {
+			frame["authority"] = t.authority
 		}
 		e.send(frame)
 	}
@@ -223,6 +310,12 @@ func (e *Extension) Run() error {
 			"description": c.description,
 		})
 	}
+	// Subscribe to session_start (protocol 2). Sent during the register phase so
+	// we are subscribed before the host's ordered-delivery guarantee kicks in
+	// (session_start reaches a subscriber before that session's first
+	// tool_call). A pre-v2 host simply records the subscription and never fires
+	// the event — harmless.
+	e.send(map[string]any{"type": "subscribe", "events": []string{"session_start"}})
 	e.send(map[string]any{"type": "ready"})
 
 	sc := bufio.NewScanner(e.in)
@@ -235,11 +328,20 @@ func (e *Extension) Run() error {
 			Args            json.RawMessage `json:"args"`
 			ProtocolVersion int             `json:"protocol_version"`
 			ZotVersion      string          `json:"zot_version"`
+			TervaVersion    string          `json:"terva_version"`
 			DataDir         string          `json:"data_dir"`
 			ExtensionDir    string          `json:"extension_dir"`
 			Provider        string          `json:"provider"`
 			Model           string          `json:"model"`
 			CWD             string          `json:"cwd"`
+
+			// Lifecycle event fields (type:"event"). For session_start the
+			// host also resends cwd (decoded above), which refreshes on /cd.
+			Event        string `json:"event"`
+			SessionID    string `json:"session_id"`
+			SessionPath  string `json:"session_path"`
+			SessionTitle string `json:"session_title"`
+			ProjectID    string `json:"project_id"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &f); err != nil {
 			e.Logf("bad frame from host: %v", err)
@@ -251,6 +353,7 @@ func (e *Extension) Run() error {
 			e.host = Host{
 				ProtocolVersion: f.ProtocolVersion,
 				ZotVersion:      f.ZotVersion,
+				TervaVersion:    f.TervaVersion,
 				DataDir:         f.DataDir,
 				ExtensionDir:    f.ExtensionDir,
 				Provider:        f.Provider,
@@ -258,9 +361,28 @@ func (e *Extension) Run() error {
 				CWD:             f.CWD,
 			}
 			e.mu.Unlock()
-			if f.ProtocolVersion != 0 && f.ProtocolVersion != ProtocolVersion {
-				e.Logf("warning: host speaks protocol_version %d but this extension implements %d (zot %s); proceeding, but behavior may drift",
-					f.ProtocolVersion, ProtocolVersion, f.ZotVersion)
+			if f.TervaVersion != "" {
+				e.Logf("host identity: terva %s (zot-compat %s), protocol_version %d", f.TervaVersion, f.ZotVersion, f.ProtocolVersion)
+			} else {
+				e.Logf("host identity: zot %s, protocol_version %d", f.ZotVersion, f.ProtocolVersion)
+			}
+			if f.ProtocolVersion > ProtocolVersion {
+				e.Logf("note: host speaks protocol_version %d, newer than this extension's %d; newer host features are ignored, everything else works",
+					f.ProtocolVersion, ProtocolVersion)
+			}
+		case "event":
+			// One-way lifecycle events; we subscribe only to session_start.
+			if f.Event == "session_start" {
+				e.mu.Lock()
+				e.session = Session{
+					ID:        f.SessionID,
+					Path:      f.SessionPath,
+					Title:     f.SessionTitle,
+					CWD:       f.CWD,
+					ProjectID: f.ProjectID,
+				}
+				e.mu.Unlock()
+				e.Logf("session_start: id=%q project=%q cwd=%q", f.SessionID, f.ProjectID, f.CWD)
 			}
 		case "tool_call":
 			h := e.handlerFor(f.Name)
