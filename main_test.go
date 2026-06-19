@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,26 @@ import (
 	"github.com/terva-sh/zot-web/internal/proto"
 	"github.com/terva-sh/zot-web/internal/version"
 )
+
+// TestManifestVersionMatchesCode pins extension.json's version (what the host
+// shows in `ext list`) equal to internal/version.Version (the hello frame, the
+// User-Agent, --version). They are bumped together at release; this guard fails
+// the build if they drift, which is how they silently disagreed before.
+func TestManifestVersionMatchesCode(t *testing.T) {
+	b, err := os.ReadFile("extension.json")
+	if err != nil {
+		t.Fatalf("read extension.json: %v", err)
+	}
+	var m struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("parse extension.json: %v", err)
+	}
+	if m.Version != version.Version {
+		t.Errorf("extension.json version %q != internal/version.Version %q — bump them together", m.Version, version.Version)
+	}
+}
 
 // TestNetworkToolsDeclareAuthority guards that every tool zot-web registers
 // declares network-read authority. They all reach the network, so terva must

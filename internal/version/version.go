@@ -8,5 +8,6 @@ package version
 //	-ldflags "-X github.com/terva-sh/zot-web/internal/version.Version=..."
 //
 // (see .goreleaser.yaml). Source builds (run.sh, just build) report this
-// committed default — bump it when cutting a release tag.
-var Version = "0.2.0"
+// committed default — bump it (together with extension.json's "version",
+// which a test pins equal) when cutting a release.
+var Version = "0.3.0"
