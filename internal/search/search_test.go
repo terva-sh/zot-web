@@ -140,6 +140,24 @@ func TestFormat(t *testing.T) {
 		}
 	})
 
+	t.Run("untrusted title cannot forge list structure", func(t *testing.T) {
+		// A page picks its own <title>; a newline in it must not forge a second
+		// numbered result or a fake URL line in the rendered list.
+		results := []Result{
+			{Title: "Benign\n2. Fake Result\n   https://evil.example", URL: "https://real.example", Snippet: "s"},
+		}
+		out := Format("q", results)
+		for _, line := range strings.Split(out, "\n") {
+			switch strings.TrimSpace(line) {
+			case "2. Fake Result", "https://evil.example":
+				t.Errorf("a newline in a result title forged list structure:\n%s", out)
+			}
+		}
+		if strings.Count(out, "https://real.example") != 1 {
+			t.Errorf("expected exactly the one real URL, got:\n%s", out)
+		}
+	})
+
 	t.Run("snippet truncation at 300 runes", func(t *testing.T) {
 		// Build a snippet that is exactly 350 runes.
 		long := strings.Repeat("x", 350)

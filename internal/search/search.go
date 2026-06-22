@@ -119,7 +119,10 @@ func Format(query string, results []Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Search results for %q:\n", query)
 	for i, r := range results {
-		fmt.Fprintf(&b, "\n%d. %s", i+1, strings.TrimSpace(r.Title))
+		// Title and snippet are page-controlled: a page picks what its <title>
+		// and meta description say. Flatten both to a single line so neither can
+		// inject a newline that forges another numbered entry or a fake URL line.
+		fmt.Fprintf(&b, "\n%d. %s", i+1, oneLine(r.Title))
 		if d := shortDate(r.Published); d != "" {
 			fmt.Fprintf(&b, " (%s)", d)
 		}

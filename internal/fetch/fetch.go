@@ -134,6 +134,9 @@ func (c *Client) Fetch(ctx context.Context, raw string, maxChars, offset int, us
 		return "", err
 	}
 
+	// p.Title is already flattened to a single line at capture (titleLine), so
+	// the `# <title>` header below can't be made to forge extra metadata lines.
+
 	if maxChars <= 0 {
 		maxChars = 20000
 	}
@@ -178,6 +181,22 @@ func (c *Client) Fetch(ctx context.Context, raw string, maxChars, offset int, us
 		b.WriteString("\n\n…[the source response was capped at the byte limit before rendering]")
 	}
 	return b.String(), nil
+}
+
+// titleLine collapses an extracted page title to a single, length-capped line.
+// The title is page-derived (untrusted) and is printed as a `# <title>` header
+// outside the body: a raw newline in it would otherwise let a crafted <title>
+// forge extra metadata lines (a fake Final-URL:, Chars:, …) that the model
+// reads as harness-authored provenance. Collapsing all whitespace — newlines
+// included — to single spaces is the same flattening web_search/web_images
+// already apply to their untrusted snippet/alt fields.
+func titleLine(s string) string {
+	s = oneLine(s)
+	const max = 300
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "…"
+	}
+	return s
 }
 
 // Images returns the images found on raw (resolved to absolute URLs). It serves
@@ -612,7 +631,7 @@ func (c *Client) render(u *url.URL, contentType string, body []byte) page {
 				if !hasMarkdownTable(md) {
 					md += extractDataTables(body)
 				}
-				return cappedPage(page{Title: strings.TrimSpace(art.Title()), Images: images, ImagesInline: inline, Links: links}, md)
+				return cappedPage(page{Title: titleLine(art.Title()), Images: images, ImagesInline: inline, Links: links}, md)
 			}
 		}
 		// Readability found content but markdown conversion produced nothing;
@@ -620,7 +639,7 @@ func (c *Client) render(u *url.URL, contentType string, body []byte) page {
 		var buf bytes.Buffer
 		if art.RenderText(&buf) == nil {
 			if t := strings.TrimSpace(buf.String()); t != "" {
-				return cappedPage(page{Title: strings.TrimSpace(art.Title()), Images: images, Links: links}, t)
+				return cappedPage(page{Title: titleLine(art.Title()), Images: images, Links: links}, t)
 			}
 		}
 	}

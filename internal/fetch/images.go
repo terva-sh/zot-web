@@ -69,10 +69,14 @@ func (im Image) isSVG() bool {
 	return strings.HasSuffix(strings.ToLower(p.Path), ".svg")
 }
 
-// dimensions renders "W×H" when both are known.
+// dimensions renders "W×H" when both are known. Width/Height come from the
+// page's <img width>/<height> attributes (untrusted), so they are flattened to
+// a single line first — a newline in an attribute value could otherwise forge
+// an extra line in the image listing.
 func (im Image) dimensions() string {
-	if im.Width != "" && im.Height != "" {
-		return im.Width + "×" + im.Height
+	w, h := oneLine(im.Width), oneLine(im.Height)
+	if w != "" && h != "" {
+		return w + "×" + h
 	}
 	return ""
 }
