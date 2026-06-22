@@ -10,4 +10,4 @@ package version
 // (see .goreleaser.yaml). Source builds (run.sh, just build) report this
 // committed default — bump it (together with extension.json's "version",
 // which a test pins equal) when cutting a release.
-var Version = "0.3.0"
+var Version = "0.3.1"
